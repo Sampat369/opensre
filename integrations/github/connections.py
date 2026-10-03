@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from integrations.github.mcp import classify, github_mcp_is_usably_configured
 
@@ -20,7 +21,8 @@ def classify_github_connections(records: list[dict[str, Any]], resolved: dict[st
     connections: list[dict[str, Any]] = []
     for record in github:
         record_id = str(record.get("id", ""))
-        for instance in _instances(record):
+        instances = _instances(record)
+        for instance in instances:
             credentials = instance.get("credentials", {})
             config, _ = classify(credentials, record_id)
             usable = (
@@ -28,12 +30,23 @@ def classify_github_connections(records: list[dict[str, Any]], resolved: dict[st
                 and config is not None
                 and github_mcp_is_usably_configured(config)
             )
+            # Keep the historical record ID for one-instance records. For a
+            # multi-instance record, qualify it with the URL-encoded instance
+            # name: ``<record-id>::instance:<name>``. This is stable across
+            # reloads, contains no credentials, and is unambiguous for normal
+            # uniquely named instances. Display names remain unchanged.
+            instance_name = str(instance.get("name", record_id))
+            connection_id = (
+                f"{record_id}::instance:{quote(instance_name, safe='')}"
+                if len(instances) > 1
+                else record_id
+            )
             connections.append(
                 {
-                    "name": instance.get("name", record_id),
+                    "name": instance_name,
                     "tags": instance.get("tags", {}),
                     "integration_id": record_id,
-                    "connection_id": record_id,
+                    "connection_id": connection_id,
                     "is_default": str(credentials.get("is_default", "false")).lower() == "true",
                     "config": config.model_dump() if usable and config else {},
                     "available": usable,
